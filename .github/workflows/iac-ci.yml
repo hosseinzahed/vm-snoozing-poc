@@ -1,0 +1,272 @@
+name: IaC Validation and Deployment
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/iac-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+
+jobs:
+  detect-iac-type:
+    name: Detect IaC Type
+    runs-on: ubuntu-latest
+    outputs:
+      iac_type: ${{ steps.detect.outputs.iac_type }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect IaC type
+        id: detect
+        run: |
+          if find infra -name "*.bicep" -type f | grep -q .; then
+            echo "iac_type=bicep" >> $GITHUB_OUTPUT
+            echo "Detected Bicep files"
+          elif find infra -name "*.tf" -type f | grep -q .; then
+            echo "iac_type=terraform" >> $GITHUB_OUTPUT
+            echo "Detected Terraform files"
+          else
+            echo "iac_type=none" >> $GITHUB_OUTPUT
+            echo "No IaC files detected"
+          fi
+
+  validate-bicep:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+    needs: detect-iac-type
+    if: needs.detect-iac-type.outputs.iac_type == 'bicep'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x ./bicep
+          sudo mv ./bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Validate Bicep files
+        run: |
+          echo "Validating Bicep files..."
+          find infra -name "*.bicep" -type f | while read file; do
+            echo "Validating $file"
+            bicep build "$file" --stdout || exit 1
+          done
+
+      - name: Run Bicep linter
+        run: |
+          echo "Running Bicep linter..."
+          find infra -name "*.bicep" -type f | while read file; do
+            echo "Linting $file"
+            bicep lint "$file" || exit 1
+          done
+
+  validate-terraform:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    needs: detect-iac-type
+    if: needs.detect-iac-type.outputs.iac_type == 'terraform'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Terraform Format Check
+        run: |
+          cd infra
+          terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          cd infra
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: |
+          cd infra
+          terraform validate
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: detect-iac-type
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov security scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra/
+          framework: terraform,bicep
+          soft_fail: false
+
+      - name: Run secret scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  deploy-bicep:
+    name: Deploy Bicep
+    runs-on: ubuntu-latest
+    needs: [detect-iac-type, validate-bicep, security-scan]
+    if: |
+      needs.detect-iac-type.outputs.iac_type == 'bicep' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        uses: azure/arm-deploy@v1
+        with:
+          scope: resourcegroup
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          template: infra/bicep/automation/main.bicep
+          parameters: infra/bicep/automation/main.bicepparam
+          failOnStdErr: false
+
+      - name: Upload runbooks
+        run: |
+          # Upload PowerShell runbooks to Automation Account
+          AUTOMATION_ACCOUNT=$(az automation account list \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --query "[?tags.managedBy=='vm-snoozing-agent'].name | [0]" -o tsv)
+          
+          if [ -n "$AUTOMATION_ACCOUNT" ]; then
+            echo "Uploading runbooks to $AUTOMATION_ACCOUNT"
+            
+            # Upload Stop-TargetedVMs runbook
+            az automation runbook replace-content \
+              --automation-account-name "$AUTOMATION_ACCOUNT" \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name "Stop-TargetedVMs" \
+              --content @infra/bicep/automation/runbooks/Stop-TargetedVMs.ps1
+            
+            # Upload Start-TargetedVMs runbook
+            az automation runbook replace-content \
+              --automation-account-name "$AUTOMATION_ACCOUNT" \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name "Start-TargetedVMs" \
+              --content @infra/bicep/automation/runbooks/Start-TargetedVMs.ps1
+            
+            # Publish runbooks
+            az automation runbook publish \
+              --automation-account-name "$AUTOMATION_ACCOUNT" \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name "Stop-TargetedVMs"
+            
+            az automation runbook publish \
+              --automation-account-name "$AUTOMATION_ACCOUNT" \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --name "Start-TargetedVMs"
+            
+            echo "Runbooks uploaded and published successfully"
+          else
+            echo "Automation Account not found"
+            exit 1
+          fi
+
+  deploy-terraform:
+    name: Deploy Terraform
+    runs-on: ubuntu-latest
+    needs: [detect-iac-type, validate-terraform, security-scan]
+    if: |
+      needs.detect-iac-type.outputs.iac_type == 'terraform' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        run: |
+          cd infra/terraform/automation
+          terraform init
+
+      - name: Terraform Plan
+        run: |
+          cd infra/terraform/automation
+          terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        run: |
+          cd infra/terraform/automation
+          terraform apply -auto-approve tfplan
+
+  comment-on-pr:
+    name: Comment on PR
+    runs-on: ubuntu-latest
+    needs: [validate-bicep, validate-terraform, security-scan]
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needs = ${{ toJSON(needs) }};
+            let status = '✅ All checks passed';
+            let details = [];
+            
+            for (const [job, result] of Object.entries(needs)) {
+              if (result.result === 'failure') {
+                status = '❌ Some checks failed';
+              }
+              details.push(`- ${job}: ${result.result}`);
+            }
+            
+            const comment = `## IaC Validation Results\n\n${status}\n\n### Details:\n${details.join('\n')}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
