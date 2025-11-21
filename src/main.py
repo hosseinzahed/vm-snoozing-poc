@@ -6,6 +6,7 @@ from agent_framework.devui import serve
 import logging
 from dotenv import load_dotenv
 from github_mcp_client import call_github_mcp
+from dataclasses import dataclass
 
 load_dotenv(override=True)
 
@@ -13,11 +14,21 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CheckRepositoryInput:
+    repository_url: str
+
+
+@dataclass
+class CheckRepositoryOutput:
+    iac_type: str
+    cloud_provider: str
+
 # Step 1: Check repository for infrastructure code
 
 
 @executor(id="check_repository")
-async def check_repository(repository_url: str, ctx: WorkflowContext[str]) -> None:
+async def check_repository(input: CheckRepositoryInput, ctx: WorkflowContext[CheckRepositoryOutput]) -> None:
     """Check repository for infrastructure code.
 
     Args:
@@ -26,20 +37,26 @@ async def check_repository(repository_url: str, ctx: WorkflowContext[str]) -> No
         str: The type of infrastructure code found ('bicep', 'terraform', or 'none').
     """
     prompt = (f"""              
-        Search through repository files in {repository_url} repository. 
-        You must return only one word: 'terraform' if any .tf file is present, 
-        'bicep' if any .bicep file is present, 
-        or 'none' otherwise.
+            Search through repository files in {input.repository_url} repository.
+            If any .bicep file is present return 'bicep' and 'azure'.
+            If any .tf file is present, check the terraform provider for aws or azure and return 'terraform' and 'azure' or 'terraform' and 'aws' accordingly.
+            If none of these files are present, return 'none' and 'none'.
+            The output structure must be two just words separated by a comma: '<iac_type>,<cloud_provider>'.
+            No further explanations are needed.
         """)
+    ctx.set_shared_state("repository_url", input.repository_url)
 
-    infra_type = await call_github_mcp(prompt)
-    logger.info("Infrastructure type found: %s", infra_type)
-    await ctx.send_message(infra_type)
+    print("Checking repository:", input.repository_url)
+    result = await call_github_mcp(prompt)
+    iac_type, cloud_provider = str(result).split(",")
+    print("Infrastructure type found:", iac_type,
+          "Cloud provider:", cloud_provider)
+    await ctx.send_message(CheckRepositoryOutput(iac_type=iac_type, cloud_provider=cloud_provider))
 
 
-# Step 2: Prepare infrastructure prompt based on predefined templates
-@executor(id="prepare_infrastructure_prompt_executor")
-async def prepare_infrastructure_prompt(infra_type: str, ctx: WorkflowContext[Never, str]) -> None:
+# Conditional Step 2: Call GitHub Coding Agent for Azure infrastructure code
+@executor(id="call_github_coding_agent_for_azure")
+async def call_github_coding_agent_for_azure(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
     """Prepare infrastructure prompt based on predefined templates.
 
     Args:
@@ -48,36 +65,41 @@ async def prepare_infrastructure_prompt(infra_type: str, ctx: WorkflowContext[Ne
     Returns:
         str: A message containing the prepared infrastructure code.
     """
+    repository_url = ctx.get_shared_state("repository_url")
+    print("Repository URL from shared state:", repository_url)
 
-    if infra_type == "Bicep":
-        result = "Prepared Bicep infrastructure code."
-    elif infra_type == "Terraform":
-        result = "Prepared Terraform infrastructure code."
-    else:
-        result = "No infrastructure code prepared."
+    if input.iac_type == "bicep":
+        prompt = "Prepared Bicep infrastructure code."
+    else:  # terraform
+        prompt = "Prepared Terraform infrastructure code."
 
-    await ctx.send_message(result)
+    await ctx.send_message(prompt)
 
-# Step 3: Call GitHub Coding Agent to generate infrastructure code
+# Conditional Step 2: Call GitHub Coding Agent for AWS infrastructure code
 
 
-@executor(id="call_gh_coding_agent_executor")
-async def call_gh_coding_agent(infra_prompt: str, ctx: WorkflowContext[Never]) -> None:
-    """Call GitHub Coding Agent to generate infrastructure code.
+@executor(id="call_github_coding_agent_for_aws")
+async def call_github_coding_agent_for_aws(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
+    """Prepare infrastructure prompt based on predefined templates.
 
     Args:
         ctx (WorkflowContext): The workflow context.
 
     Returns:
-        Never
+        str: A message containing the prepared infrastructure code.
     """
+    repository_url = ctx.get_shared_state("repository_url")
+    print("Repository URL from shared state:", repository_url)
 
-    # Placeholder for actual GitHub Coding Agent call logic
-    await ctx.send_message("GitHub Coding Agent called with prompt: " + infra_prompt)
+    prompt = "Prepared Terraform infrastructure code."
+
+    await ctx.send_message(prompt)
+
+# Step 3: Notify about workflow completion
 
 
 @executor(id="notify")
-async def notify(infra_type: str, ctx: WorkflowContext[Never, str]) -> None:
+async def notify(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
     """Send notification about workflow completion.
 
     Args:
@@ -87,9 +109,9 @@ async def notify(infra_type: str, ctx: WorkflowContext[Never, str]) -> None:
         str: A message indicating the workflow has completed.
     """
 
-    result = f"Workflow completed successfully. - infra_type: {infra_type}"
+    result = f"Workflow completed successfully. Infrastructure type: {input.iac_type}, Cloud provider: {input.cloud_provider}"
     logger.info(result)
-    await ctx.send_message(result)
+    await ctx.yield_output(result)
 
 
 def create_workflow() -> WorkflowBuilder:
@@ -98,7 +120,11 @@ def create_workflow() -> WorkflowBuilder:
             name="VM Snoozing POC DevUI Workflow",
             description="A branching workflow demonstrating VM snoozing POC using different infrastructure code templates.",
         )
-        .add_edge(check_repository, notify)
+        .add_edge(check_repository, notify, condition=lambda output: output.iac_type == "none")
+        .add_edge(check_repository, call_github_coding_agent_for_azure, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "azure")
+        .add_edge(check_repository, call_github_coding_agent_for_aws, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "aws")
+        .add_edge(call_github_coding_agent_for_azure, notify)
+        .add_edge(call_github_coding_agent_for_aws, notify)
         .set_start_executor(check_repository)
         .build()
     )
