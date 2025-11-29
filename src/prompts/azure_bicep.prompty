@@ -1,0 +1,106 @@
+You are an Azure infrastructure automation expert. Call GitHub Coding Agent and follow these instructions step by step to implement VM snoozing automation using Bicep and Azure Automation.
+
+## Prerequisites
+- Repository URL: {repository_url}
+- Target Resource Group: "rg-vm-snoozing-automation"
+- Target Location: "Sweden Central"
+
+## Step 1: Branch Management
+Create a new branch named `vm_snoozing_automation_<random_number>` from the main branch.
+
+## Step 2: Locate Infrastructure Directory
+Identify the infrastructure folder in the repository. If multiple infrastructure folders exist, use the one containing Bicep configurations (.bicep files).
+
+## Step 3: Create Bicep Configuration
+Create a new Bicep file named `automation-account.bicep` in the infrastructure folder with the following components:
+
+### 3.1 Parameters
+Define parameters for resource group name (default: "rg-vm-snoozing-automation"), location (default: "Sweden Central"), automation account name (default: "aa-vm-snoozing-automation"), and VM tags filter (default: AutoSnooze = "true").
+
+### 3.2 Resource Group
+Create a resource group resource with the specified name and location. Include tags for Purpose ("VM Snoozing Automation") and Environment ("Production").
+
+### 3.3 Automation Account
+Create an Automation Account resource with:
+- Name: from parameter
+- Location: from parameter
+- Resource Group: reference the created resource group
+- SKU: "Basic"
+- Identity: System-assigned managed identity
+- Tags: Purpose and Environment
+
+### 3.4 Role Assignment for Managed Identity
+Create a role assignment resource to grant the automation account's managed identity "Virtual Machine Contributor" role at the subscription scope.
+
+### 3.5 PowerShell Runbook with Modern Az Modules
+Create a runbook resource with:
+- Name: "Stop-Start-AzureVM"
+- Type: PowerShell
+- Log verbose and progress enabled
+- Content: A PowerShell script that:
+  - Accepts parameters: Action (Start/Stop), ResourceGroupName (optional), VMNames (optional), TagFilter (optional)
+  - Authenticates using Managed Identity with `Connect-AzAccount -Identity`
+  - Uses modern Az modules: `Get-AzVM`, `Start-AzVM`, `Stop-AzVM`
+  - Filters VMs by resource group, name list, or tags as specified
+  - Checks VM power state before taking action
+  - Includes comprehensive error handling and logging
+  - Returns success/failure counts
+
+### 3.6 Schedules (Optional)
+Create two schedule resources:
+- Stop schedule: Weekdays at 6 PM (W. Europe Standard Time)
+- Start schedule: Weekdays at 8 AM (W. Europe Standard Time)
+Both should use frequency "Week", interval 1, and specify Monday-Friday.
+
+### 3.7 Outputs
+Define outputs for:
+- Automation account ID
+- Managed identity principal ID
+- Runbook name
+
+## Step 4: Validate Bicep Configuration
+Run the following commands to validate the configuration:
+- `bicep build automation-account.bicep` - Build and validate the Bicep file
+- Check for any warnings or errors
+
+## Step 5: Commit and Push Changes
+1. Stage the new file(s): `git add .`
+2. Commit with descriptive message: `git commit -m "Add Azure Automation Account for VM snoozing with Bicep"`
+3. Push the branch: `git push origin <branch_name>`
+
+## Step 6: Create Pull Request
+Create a pull request with:
+- **Title**: "Add Azure Automation Account for VM Snoozing"
+- **Description**: 
+  ```
+  This PR adds Bicep configuration for Azure Automation Account with VM snoozing capabilities.
+  
+  ## Changes
+  - Created automation-account.bicep with Automation Account resource
+  - Configured System-assigned Managed Identity
+  - Added VM Contributor role assignment
+  - Implemented modern PowerShell runbook using Az modules
+  - Added support for tag-based VM filtering
+  - Included optional schedules for automated start/stop
+  
+  ## Features
+  - Uses Managed Identity (no credentials needed)
+  - Modern Az PowerShell modules (not deprecated AzureRm)
+  - Flexible VM filtering by resource group, name, or tags
+  - Comprehensive error handling and logging
+  - Ready for schedule-based automation
+  ```
+
+## Step 7: Return Results
+Return ONLY the following JSON output with no additional text:
+```json
+{
+  "pull_request_url": "<URL of the created pull request>",
+  "branch_name": "<Name of the branch created>",
+  "error": "<Error message if any, else null>"
+}
+```
+
+
+
+

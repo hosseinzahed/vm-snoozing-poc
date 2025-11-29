@@ -1,12 +1,13 @@
 import os
 import asyncio
-from agent_framework import ChatAgent, MCPStreamableHTTPTool
+from agent_framework import ChatAgent, MCPStreamableHTTPTool, ai_function
 from agent_framework.azure import AzureAIAgentClient
 from azure.identity.aio import DefaultAzureCredential
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+@ai_function(name="github_mcp", description="Call GitHub MCP server with a prompt and return the response.")
 async def call_github_mcp(prompt: str) -> str:
     """Example using an HTTP-based MCP server."""
     async with (

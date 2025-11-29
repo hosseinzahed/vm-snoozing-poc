@@ -7,6 +7,7 @@ import logging
 from dotenv import load_dotenv
 from github_mcp_client import call_github_mcp
 from dataclasses import dataclass
+from prompts_service import prompts_service
 
 load_dotenv(override=True)
 
@@ -23,6 +24,11 @@ class CheckRepositoryInput:
 class CheckRepositoryOutput:
     iac_type: str
     cloud_provider: str
+
+@dataclass
+class PullRequestOutput:
+    pull_request_url: str
+    branch_name: str
 
 # Step 1: Check repository for infrastructure code
 
@@ -44,19 +50,19 @@ async def check_repository(input: CheckRepositoryInput, ctx: WorkflowContext[Che
             The output structure must be two just words separated by a comma: '<iac_type>,<cloud_provider>'.
             No further explanations are needed.
         """)
-    ctx.set_shared_state("repository_url", input.repository_url)
+    await ctx.set_shared_state("repository_url", input.repository_url)
 
     print("Checking repository:", input.repository_url)
     result = await call_github_mcp(prompt)
     iac_type, cloud_provider = str(result).split(",")
-    print("Infrastructure type found:", iac_type,
-          "Cloud provider:", cloud_provider)
+    print("Infrastructure type found:", iac_type)
+    print("Cloud provider:", cloud_provider)
     await ctx.send_message(CheckRepositoryOutput(iac_type=iac_type, cloud_provider=cloud_provider))
 
 
 # Conditional Step 2: Call GitHub Coding Agent for Azure infrastructure code
-@executor(id="call_github_coding_agent_for_azure")
-async def call_github_coding_agent_for_azure(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
+@executor(id="handle_azure_infrastructure")
+async def handle_azure_infrastructure(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
     """Prepare infrastructure prompt based on predefined templates.
 
     Args:
@@ -65,21 +71,27 @@ async def call_github_coding_agent_for_azure(input: CheckRepositoryOutput, ctx: 
     Returns:
         str: A message containing the prepared infrastructure code.
     """
-    repository_url = ctx.get_shared_state("repository_url")
+    repository_url = await ctx.get_shared_state("repository_url")
     print("Repository URL from shared state:", repository_url)
 
-    if input.iac_type == "bicep":
-        prompt = "Prepared Bicep infrastructure code."
-    else:  # terraform
-        prompt = "Prepared Terraform infrastructure code."
+    prompt = prompts_service.load_azure_prompt(
+        iac_type=input.iac_type, 
+        repository_url=repository_url
+    )
+    print(prompt)
+    
+    response = await call_github_mcp(prompt)
+    print("Response from GitHub MCP for Azure infrastructure:", response)
+    
+    # Parse the text response into PullRequestOutput dataclass  
 
     await ctx.send_message(prompt)
 
 # Conditional Step 2: Call GitHub Coding Agent for AWS infrastructure code
 
 
-@executor(id="call_github_coding_agent_for_aws")
-async def call_github_coding_agent_for_aws(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
+@executor(id="handle_aws_infrastructure")
+async def handle_aws_infrastructure(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
     """Prepare infrastructure prompt based on predefined templates.
 
     Args:
@@ -114,17 +126,32 @@ async def notify(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str])
     await ctx.yield_output(result)
 
 
+@executor(id="skip")
+async def skip(input: CheckRepositoryOutput, ctx: WorkflowContext[Never, str]) -> None:
+    """Skip the workflow.
+
+    Args:
+        ctx (WorkflowContext): The workflow context.
+
+    Returns:
+        str: A message indicating the workflow has skipped.
+    """
+
+    result = f"Workflow skipped. Infrastructure type: {input.iac_type}, Cloud provider: {input.cloud_provider}"
+    logger.info(result)
+    await ctx.yield_output(result)
+
 def create_workflow() -> WorkflowBuilder:
     workflow = (
         WorkflowBuilder(
             name="VM Snoozing POC DevUI Workflow",
             description="A branching workflow demonstrating VM snoozing POC using different infrastructure code templates.",
         )
-        .add_edge(check_repository, notify, condition=lambda output: output.iac_type == "none")
-        .add_edge(check_repository, call_github_coding_agent_for_azure, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "azure")
-        .add_edge(check_repository, call_github_coding_agent_for_aws, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "aws")
-        .add_edge(call_github_coding_agent_for_azure, notify)
-        .add_edge(call_github_coding_agent_for_aws, notify)
+        .add_edge(check_repository, skip, condition=lambda output: output.iac_type == "none")
+        .add_edge(check_repository, handle_azure_infrastructure, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "azure")
+        .add_edge(check_repository, handle_aws_infrastructure, condition=lambda output: output.iac_type != "none" and output.cloud_provider == "aws")
+        .add_edge(handle_azure_infrastructure, notify)
+        .add_edge(handle_aws_infrastructure, notify)
         .set_start_executor(check_repository)
         .build()
     )
