@@ -1,8 +1,8 @@
-# VM Snoozing POC
+# 🌙 VM Snoozing POC
 
 An automated workflow system for implementing VM snoozing automation in Azure and AWS cloud environments using Infrastructure as Code (IaC). This POC leverages GitHub Coding Agent and Microsoft Agent Framework to automatically detect repository infrastructure type and generate appropriate automation code.
 
-## Overview
+## 📋 Overviewiew
 
 This project demonstrates an agentic workflow that:
 1. Analyzes a GitHub repository to detect Infrastructure as Code type (Bicep or Terraform)
@@ -12,7 +12,7 @@ This project demonstrates an agentic workflow that:
 5. Creates a pull request with the changes
 6. Tracks the workflow through to completion
 
-## Architecture
+## 🏗️ Architecture
 
 The workflow consists of multiple executor nodes:
 
@@ -32,7 +32,7 @@ check_repository → code_generator → associate_issue_to_pr → notify
   - `azure_bicep.prompty`: Bicep for Azure
   - `azure_tf-full.prompty`: Full Terraform template reference (Not optimal for GitHub Coding Agent)
 
-## Features
+## ✨ Features
 
 - **Automatic IaC Detection**: Identifies Bicep (.bicep) or Terraform (.tf) files
 - **Cloud Provider Detection**: Determines Azure or AWS from Terraform provider configuration
@@ -41,7 +41,7 @@ check_repository → code_generator → associate_issue_to_pr → notify
 - **DevUI Interface**: Visual workflow monitoring on http://localhost:8093
 - **Error Handling**: Comprehensive retry logic and status tracking
 
-## Prerequisites
+## 📦 Prerequisites
 
 ### Required Software
 - Python 3.9+
@@ -71,7 +71,7 @@ AZURE_OPENAI_API_KEY=your_api_key
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4.1-mini
 ```
 
-## Installation
+## 🚀 Installation
 
 1. **Clone the repository**:
    ```powershell
@@ -93,7 +93,7 @@ AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4.1-mini
    az login
    ```
 
-## How to Run
+## ▶️ How to Run
 
 ### Start the Workflow DevUI
 
@@ -126,7 +126,7 @@ Use this sample Azure Terraform repository for testing:
 https://github.com/hosseinzahed/sample-azure-tf-repo
 ```
 
-## Workflow Stages
+## 🔄 Workflow Stages
 
 ### 1. Check Repository
 - Searches for `.bicep` or `.tf` files
@@ -152,7 +152,7 @@ https://github.com/hosseinzahed/sample-azure-tf-repo
 - Displays all relevant URLs and status
 - Logs final results
 
-## Prompt Templates
+## 📝 Prompt Templates
 
 ### Azure Terraform (`azure_tf.prompty`)
 Generates Terraform configuration with:
@@ -172,7 +172,7 @@ Generates Bicep configuration with equivalent resources using ARM template synta
 - Include comprehensive error handling
 - Use Managed Identity (no credentials in code)
 
-## Infrastructure Generated
+## ☁️ Infrastructure Generated
 
 The workflow creates Azure resources for VM snoozing automation:
 
@@ -195,7 +195,7 @@ The workflow creates Azure resources for VM snoozing automation:
 - **Stop Schedule**: Weekdays at 6 PM (W. Europe Standard Time)
 - **Start Schedule**: Weekdays at 8 AM (W. Europe Standard Time)
 
-## Potential Issues & Troubleshooting
+## ⚠️ Potential Issues & Troubleshooting
 
 ### GitHub Coding Agent Issues
 
@@ -267,7 +267,7 @@ The workflow creates Azure resources for VM snoozing automation:
   pip install -r requirements.txt --upgrade
   ```
 
-## API & Integration Details
+## 🔌 API & Integration Details
 
 ### GitHub MCP Server
 - **Endpoint**: `https://api.githubcopilot.com/mcp`
@@ -279,7 +279,7 @@ The workflow creates Azure resources for VM snoozing automation:
 - **Authentication**: DefaultAzureCredential
 - **Framework**: Microsoft Agent Framework (agent-framework package)
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 vm-snoozing-poc/
@@ -299,33 +299,37 @@ vm-snoozing-poc/
 └── .env                          # Environment variables (not committed)
 ```
 
-## Contributing
+## 🤝 Contributing
 
 When adding new prompt templates:
 1. Place `.prompty` files in `src/prompts/`
 2. Update `prompts_service.py` to handle the new combination
-3. Follow the existing naming convention: `<cloud>_<iac>.prompty`
-4. Include comprehensive implementation guidelines in prompts
+- Follow the existing naming convention: `<cloud>_<iac>.prompty`
+- Include comprehensive implementation guidelines in prompts
 
-## References
+## 📚 References
 
 - [Azure Identity Credential Chains](https://learn.microsoft.com/en-us/azure/developer/python/sdk/authentication/credential-chains?tabs=dac#defaultazurecredential-overview)
 - [GitHub Coding Agent Documentation](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent)
 - [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
 - [Azure Automation Account Documentation](https://learn.microsoft.com/en-us/azure/automation/)
 
-## Sample Repository
+## 🧪 Sample Repository
 
 Test with this sample Azure Terraform repository:
 [https://github.com/hosseinzahed/sample-azure-tf-repo](https://github.com/hosseinzahed/sample-azure-tf-repo)
 
-## License
+## 📄 License
 
 This is a sample repository for demonstration purposes.
 
-## Support
+## 💬 Support
 
 For issues and questions:
 - Create an issue in this repository
 - Check the troubleshooting section above
 - Review Azure and GitHub documentation links
+
+## 🤝 Contributing
+
+Feel free to fork this repository and customize it for your needs.
