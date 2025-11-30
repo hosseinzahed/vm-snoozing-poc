@@ -1,105 +1,112 @@
-You are an Azure infrastructure automation expert. Call GitHub Coding Agent and follow these instructions step by step to implement VM snoozing automation using Bicep and Azure Automation.
+You are an Azure infrastructure automation expert. 
+Use GitHub Coding Agent to manage the workflow for implementing VM snoozing automation.
 
-## Prerequisites
-- Repository URL: {repository_url}
-- Target Resource Group: "rg-vm-snoozing-automation"
-- Target Location: "Sweden Central"
+## Inputs
+- **Repository URL**: {repository_url}
 
-## Step 1: Branch Management
-Create a new branch named `vm_snoozing_automation_<random_number>` from the main branch.
+## Workflow Steps
 
-## Step 2: Locate Infrastructure Directory
-Identify the infrastructure folder in the repository. If multiple infrastructure folders exist, use the one containing Bicep configurations (.bicep files).
+### Step 1: Create GitHub Issue
+Create an issue in the repository with the following details:
+- **Title**: "Add Bicep infrastructure for VM snoozing automation"
+- **Body**: Include task description and requirements (see Requirements section below)
+- **Labels**: ["infrastructure", "bicep", "automation"]
 
-## Step 3: Create Bicep Configuration
-Create a new Bicep file named `automation-account.bicep` in the infrastructure folder with the following components:
+### Step 2: Create Pull Request
+Create a pull request will be automatically created by Coding Agent:
+- Coding Agent will create a new branch automatically
+- Make sure the branch name contains a random 5 digit number at the end like `add-vm-snoozing-automation-12345`
+- **Title**: "Add VM snoozing automation infrastructure"
+- **Base Branch**: main (or default branch)
+- **Body**: Reference the issue created in Step 1 using "Closes #<issue_number>"
 
-### 3.1 Parameters
-Define parameters for resource group name (default: "rg-vm-snoozing-automation"), location (default: "Sweden Central"), automation account name (default: "aa-vm-snoozing-automation"), and VM tags filter (default: AutoSnooze = "true").
+### Step 3: Assign Issue to Coding Agent
+Assign the issue created in Step 1 to the Coding Agent to implement the changes:
+- The Coding Agent should add Bicep infrastructure code to the **main.bicep** file
+- All implementation guidelines and requirements below should be followed
 
-### 3.2 Resource Group
-Create a resource group resource with the specified name and location. Include tags for Purpose ("VM Snoozing Automation") and Environment ("Production").
+### Step 4: Return URLs
+After completing Steps 1-3, return the following URLs:
+- Pull Request URL
+- Issue URL
 
-### 3.3 Automation Account
-Create an Automation Account resource with:
-- Name: from parameter
-- Location: from parameter
-- Resource Group: reference the created resource group
-- SKU: "Basic"
-- Identity: System-assigned managed identity
-- Tags: Purpose and Environment
+## Task Description for Issue/PR
+Add Bicep infrastructure code to the **main.bicep** file for Azure VM snoozing automation.
 
-### 3.4 Role Assignment for Managed Identity
-Create a role assignment resource to grant the automation account's managed identity "Virtual Machine Contributor" role at the subscription scope.
+## Important Guidelines
+- **DO NOT modify or remove existing code** in main.bicep
+- **DO NOT change existing targetScope or parameter configurations**
+- **APPEND new resources** to the end of the file
+- **Preserve all existing resources, variables, and configurations**
+- Only add the VM snoozing automation resources listed below
 
-### 3.5 PowerShell Runbook with Modern Az Modules
-Create a runbook resource with:
-- Name: "Stop-Start-AzureVM"
-- Type: PowerShell
-- Log verbose and progress enabled
-- Content: A PowerShell script that:
-  - Accepts parameters: Action (Start/Stop), ResourceGroupName (optional), VMNames (optional), TagFilter (optional)
-  - Authenticates using Managed Identity with `Connect-AzAccount -Identity`
-  - Uses modern Az modules: `Get-AzVM`, `Start-AzVM`, `Stop-AzVM`
-  - Filters VMs by resource group, name list, or tags as specified
-  - Checks VM power state before taking action
-  - Includes comprehensive error handling and logging
-  - Returns success/failure counts
+## Requirements
 
-### 3.6 Schedules (Optional)
-Create two schedule resources:
-- Stop schedule: Weekdays at 6 PM (W. Europe Standard Time)
-- Start schedule: Weekdays at 8 AM (W. Europe Standard Time)
-Both should use frequency "Week", interval 1, and specify Monday-Friday.
+### Naming Convention
+All resources MUST end with `-vm-snoozing-automation`
 
-### 3.7 Outputs
-Define outputs for:
-- Automation account ID
-- Managed identity principal ID
-- Runbook name
+### Resources to Create in main.bicep
 
-## Step 4: Validate Bicep Configuration
-Run the following commands to validate the configuration:
-- `bicep build automation-account.bicep` - Build and validate the Bicep file
-- Check for any warnings or errors
+1. **Parameters** (only if NOT already defined)
+   - resourceGroupName (default: 'rg-vm-snoozing-automation')
+   - location (default: 'Sweden Central')
+   - automationAccountName (default: 'aa-vm-snoozing-automation')
+   - vmTagsFilter (default: { AutoSnooze: 'true' })
 
-## Step 5: Commit and Push Changes
-1. Stage the new file(s): `git add .`
-2. Commit with descriptive message: `git commit -m "Add Azure Automation Account for VM snoozing with Bicep"`
-3. Push the branch: `git push origin <branch_name>`
+2. **Resource Group**
+   - Name: `rg-vm-snoozing-automation`
+   - Location: `Sweden Central`
+   - Tags: Purpose = "VM Snoozing Automation", Environment = "Production"
 
-## Step 6: Create Pull Request
-Create a pull request with:
-- **Title**: "Add Azure Automation Account for VM Snoozing"
-- **Description**: 
-  ```
-  This PR adds Bicep configuration for Azure Automation Account with VM snoozing capabilities.
-  
-  ## Changes
-  - Created automation-account.bicep with Automation Account resource
-  - Configured System-assigned Managed Identity
-  - Added VM Contributor role assignment
-  - Implemented modern PowerShell runbook using Az modules
-  - Added support for tag-based VM filtering
-  - Included optional schedules for automated start/stop
-  
-  ## Features
-  - Uses Managed Identity (no credentials needed)
-  - Modern Az PowerShell modules (not deprecated AzureRm)
-  - Flexible VM filtering by resource group, name, or tags
-  - Comprehensive error handling and logging
-  - Ready for schedule-based automation
-  ```
+3. **Automation Account**
+   - Name: `aa-vm-snoozing-automation`
+   - SKU: Basic
+   - Identity: System-assigned managed identity
+   - Tags: Purpose and Environment
 
-## Step 7: Return Results
-Return ONLY the following JSON output with no additional text:
+4. **Role Assignment**
+   - Role: Virtual Machine Contributor
+   - Scope: Subscription level
+   - Principal: Automation account managed identity
+
+5. **PowerShell Runbook**
+   - Name: `Stop-Start-AzureVM`
+   - Type: PowerShell
+   - Log verbose and progress enabled
+   - Parameters: Action (Start/Stop), ResourceGroupName, VMNames, TagName (default: AutoSnooze), TagValue (default: true)
+   - Logic: Connect with managed identity, filter VMs by tags/names/resource group, check power state, start/stop as needed, log results
+
+6. **Schedules**
+   - Stop Schedule: Weekdays at 6 PM (W. Europe time)
+   - Start Schedule: Weekdays at 8 AM (W. Europe time)
+   - Frequency: Week, Interval: 1, Monday-Friday
+
+7. **Outputs**
+   - Automation account ID
+   - Managed identity principal ID
+   - Runbook name
+
+## Implementation Steps for Coding Agent
+1. Create a new branch automatically
+2. Locate or create main.bicep file
+3. Add all infrastructure resources to main.bicep
+4. Validate: `bicep build main.bicep`
+5. Commit: "Add VM snoozing automation infrastructure"
+6. Create pull request
+
+## Output Format
+Return results as a JSON object with the following structure:
 ```json
-{
-  "pull_request_url": "<URL of the created pull request>",
-  "branch_name": "<Name of the branch created>",
-  "error": "<Error message if any, else null>"
-}
+{{
+  "status": "success|partial_success|failed",
+  "repository_url": "string",
+  "branch_name": "string",  
+  "issue_url": "string",  
+  "errors": [],
+  "warnings": []
+}}
 ```
+Do NOT include any explanations or additional text outside the JSON object.
 
 
 

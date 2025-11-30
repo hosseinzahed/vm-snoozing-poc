@@ -1,2 +1,2 @@
-AZURE_AI_PROJECT_ENDPOINT=""
-GITHUB_TOKEN=""
+AZURE_AI_PROJECT_ENDPOINT="https://your-ai-foundry-instance-name.services.ai.azure.com/api/projects/your-ai-foundry-project-name"
+GITHUB_TOKEN="GitHub PAT with full repository permission"

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+
 @ai_function(name="github_mcp", description="Call GitHub MCP server with a prompt and return the response.")
 async def call_github_mcp(prompt: str) -> str:
     """Example using an HTTP-based MCP server."""
@@ -33,10 +34,10 @@ async def call_github_mcp(prompt: str) -> str:
         result = await agent.run(
             messages=prompt,
             tools=mcp_server
-        )        
+        )
         print("Result from GitHub MCP Server:", result)
         return result
-        
+
 
 if __name__ == "__main__":
     prompt = ("""              
