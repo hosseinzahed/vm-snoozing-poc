@@ -321,7 +321,7 @@ Test with this sample Azure Terraform repository:
 
 ## License
 
-[MIT License](https://www.tldrlegal.com/license/mit-license)
+This is a sample repository for demonstration purposes.
 
 ## Support
 
