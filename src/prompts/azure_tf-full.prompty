@@ -1,0 +1,315 @@
+You are an Azure infrastructure automation expert. Follow these instructions step by step to implement VM snoozing automation using Terraform and Azure Automation.
+
+## Prerequisites
+- Repository URL: {repository_url}
+- Target Resource Group: "rg-vm-snoozing-automation"
+- Target Location: "Sweden Central"
+
+## Step 1: Branch Management
+Create a new branch named `vm_snoozing_automation_<random_number>` from the main branch.
+
+## Step 2: Locate Infrastructure Directory
+Identify the infrastructure folder in the repository. If multiple infrastructure folders exist, use the one containing Terraform configurations (.tf files).
+
+## Step 3: Create Terraform Configuration
+Create a new Terraform file named `automation-account.tf` in the infrastructure folder with the following components:
+
+### 3.1 Variables (if not using existing variables.tf)
+```hcl
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+  default     = "rg-vm-snoozing-automation"
+}
+
+variable "location" {
+  description = "Azure region for resources"
+  type        = string
+  default     = "Sweden Central"
+}
+
+variable "automation_account_name" {
+  description = "Name of the automation account"
+  type        = string
+  default     = "aa-vm-snoozing-automation"
+}
+
+variable "vm_tags_filter" {
+  description = "Tags to filter VMs for automation"
+  type        = map(string)
+  default     = {
+    AutoSnooze = "true"
+  }
+}
+```
+
+### 3.2 Data Sources
+```hcl
+data "azurerm_subscription" "current" {}
+```
+
+### 3.3 Resource Group
+Create the resource group if it doesn't already exist:
+```hcl
+resource "azurerm_resource_group" "automation_rg" {
+  name     = var.resource_group_name
+  location = var.location
+
+  tags = {
+    Purpose     = "VM Snoozing Automation"
+    Environment = "Production"
+  }
+}
+```
+
+### 3.4 Automation Account
+```hcl
+resource "azurerm_automation_account" "vm_snoozing" {
+  name                = var.automation_account_name
+  location            = var.location
+  resource_group_name = azurerm_resource_group.automation_rg.name
+  sku_name            = "Basic"
+  
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = {
+    Purpose     = "VM Snoozing Automation"
+    Environment = "Production"
+  }
+}
+```
+
+### 3.5 Role Assignment for Managed Identity
+```hcl
+resource "azurerm_role_assignment" "automation_contributor" {
+  scope                = data.azurerm_subscription.current.id
+  role_definition_name = "Virtual Machine Contributor"
+  principal_id         = azurerm_automation_account.vm_snoozing.identity[0].principal_id
+}
+```
+
+### 3.6 PowerShell Runbook with Modern Az Modules
+```hcl
+resource "azurerm_automation_runbook" "vm_snoozing_runbook" {
+  name                    = "Stop-Start-AzureVM"
+  location                = var.location
+  resource_group_name     = azurerm_resource_group.automation_rg.name
+  automation_account_name = azurerm_automation_account.vm_snoozing.name
+  log_verbose             = true
+  log_progress            = true
+  runbook_type            = "PowerShell"
+
+  content = <<-POWERSHELL
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("Start", "Stop")]
+        [string]$Action,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$ResourceGroupName = "All",
+        
+        [Parameter(Mandatory = $false)]
+        [string]$VMNames = "All",
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$TagFilter = @{}
+    )
+
+    # Authenticate using Managed Identity
+    try {
+        Write-Output "Connecting to Azure using Managed Identity..."
+        Connect-AzAccount -Identity -ErrorAction Stop
+        Write-Output "Successfully connected to Azure"
+    }
+    catch {
+        Write-Error "Failed to authenticate with Azure: $_"
+        throw
+    }
+
+    # Get VMs based on filters
+    try {
+        $vmsToProcess = @()
+        
+        if ($ResourceGroupName -eq "All") {
+            Write-Output "Retrieving all VMs in subscription..."
+            $allVMs = Get-AzVM
+        }
+        else {
+            Write-Output "Retrieving VMs in resource group: $ResourceGroupName"
+            $allVMs = Get-AzVM -ResourceGroupName $ResourceGroupName
+        }
+
+        # Filter by VM names if specified
+        if ($VMNames -ne "All") {
+            $vmNameList = $VMNames -split ","
+            $allVMs = $allVMs | Where-Object { $vmNameList -contains $_.Name }
+        }
+
+        # Filter by tags if specified
+        if ($TagFilter.Count -gt 0) {
+            $allVMs = $allVMs | Where-Object {
+                $vm = $_
+                $matchesTags = $true
+                foreach ($key in $TagFilter.Keys) {
+                    if (-not $vm.Tags.ContainsKey($key) -or $vm.Tags[$key] -ne $TagFilter[$key]) {
+                        $matchesTags = $false
+                        break
+                    }
+                }
+                $matchesTags
+            }
+        }
+
+        $vmsToProcess = $allVMs
+        Write-Output "Found $($vmsToProcess.Count) VMs to process"
+    }
+    catch {
+        Write-Error "Failed to retrieve VMs: $_"
+        throw
+    }
+
+    # Validate VMs exist
+    if ($vmsToProcess.Count -eq 0) {
+        Write-Warning "No VMs found matching the specified criteria"
+        return
+    }
+
+    # Process VMs based on action
+    $successCount = 0
+    $failureCount = 0
+
+    foreach ($vm in $vmsToProcess) {
+        try {
+            $vmStatus = Get-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Status
+            $powerState = ($vmStatus.Statuses | Where-Object { $_.Code -like "PowerState/*" }).Code -replace "PowerState/", ""
+
+            if ($Action -eq "Stop") {
+                if ($powerState -eq "running") {
+                    Write-Output "Stopping VM: $($vm.Name) in resource group: $($vm.ResourceGroupName)"
+                    Stop-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Force -ErrorAction Stop | Out-Null
+                    Write-Output "Successfully stopped VM: $($vm.Name)"
+                    $successCount++
+                }
+                else {
+                    Write-Output "VM $($vm.Name) is already in state: $powerState (skipping)"
+                }
+            }
+            elseif ($Action -eq "Start") {
+                if ($powerState -ne "running") {
+                    Write-Output "Starting VM: $($vm.Name) in resource group: $($vm.ResourceGroupName)"
+                    Start-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -ErrorAction Stop | Out-Null
+                    Write-Output "Successfully started VM: $($vm.Name)"
+                    $successCount++
+                }
+                else {
+                    Write-Output "VM $($vm.Name) is already running (skipping)"
+                }
+            }
+        }
+        catch {
+            Write-Error "Failed to $Action VM $($vm.Name): $_"
+            $failureCount++
+        }
+    }
+
+    Write-Output "Operation completed: $successCount succeeded, $failureCount failed"
+POWERSHELL
+
+  tags = {
+    Purpose = "VM Snoozing Automation"
+  }
+}
+```
+
+### 3.7 Schedules (Optional - Add if needed)
+```hcl
+# Stop VMs at 6 PM on weekdays
+resource "azurerm_automation_schedule" "stop_vms_weekday" {
+  name                    = "StopVMs-Weekday-6PM"
+  resource_group_name     = azurerm_resource_group.automation_rg.name
+  automation_account_name = azurerm_automation_account.vm_snoozing.name
+  frequency               = "Week"
+  interval                = 1
+  timezone                = "W. Europe Standard Time"
+  start_time              = formatdate("YYYY-MM-DD'T'18:00:00Z", timeadd(timestamp(), "24h"))
+  week_days               = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+}
+
+# Start VMs at 8 AM on weekdays
+resource "azurerm_automation_schedule" "start_vms_weekday" {
+  name                    = "StartVMs-Weekday-8AM"
+  resource_group_name     = azurerm_resource_group.automation_rg.name
+  automation_account_name = azurerm_automation_account.vm_snoozing.name
+  frequency               = "Week"
+  interval                = 1
+  timezone                = "W. Europe Standard Time"
+  start_time              = formatdate("YYYY-MM-DD'T'08:00:00Z", timeadd(timestamp(), "24h"))
+  week_days               = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+}
+```
+
+### 3.8 Outputs
+```hcl
+output "automation_account_id" {
+  description = "ID of the automation account"
+  value       = azurerm_automation_account.vm_snoozing.id
+}
+
+output "automation_account_identity" {
+  description = "Managed identity principal ID"
+  value       = azurerm_automation_account.vm_snoozing.identity[0].principal_id
+}
+
+output "runbook_name" {
+  description = "Name of the VM snoozing runbook"
+  value       = azurerm_automation_runbook.vm_snoozing_runbook.name
+}
+```
+
+## Step 4: Validate Terraform Configuration
+Run the following commands to validate the configuration:
+- `terraform fmt` - Format the Terraform code
+- `terraform validate` - Validate the syntax and configuration
+
+## Step 5: Commit and Push Changes
+1. Stage the new file(s): `git add .`
+2. Commit with descriptive message: `git commit -m "Add Azure Automation Account for VM snoozing with Terraform"`
+3. Push the branch: `git push origin <branch_name>`
+
+## Step 6: Create Pull Request
+Create a pull request with:
+- **Title**: "Add Azure Automation Account for VM Snoozing"
+- **Description**: 
+  ```
+  This PR adds Terraform configuration for Azure Automation Account with VM snoozing capabilities.
+  
+  ## Changes
+  - Created automation-account.tf with Automation Account resource
+  - Configured System-assigned Managed Identity
+  - Added VM Contributor role assignment
+  - Implemented modern PowerShell runbook using Az modules
+  - Added support for tag-based VM filtering
+  - Included optional schedules for automated start/stop
+  
+  ## Features
+  - Uses Managed Identity (no credentials needed)
+  - Modern Az PowerShell modules (not deprecated AzureRm)
+  - Flexible VM filtering by resource group, name, or tags
+  - Comprehensive error handling and logging
+  - Ready for schedule-based automation
+  ```
+
+## Step 7: Return Results
+Return ONLY the following JSON output with no additional text:
+```json
+{
+  "pull_request_url": "<URL of the created pull request>",
+  "branch_name": "<Name of the branch created>",
+  "error": "<Error message if any, else null>"
+}
+```
+
+
+
